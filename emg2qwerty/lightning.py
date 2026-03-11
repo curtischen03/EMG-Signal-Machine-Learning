@@ -163,8 +163,6 @@ class TDSConvCTCModule(pl.LightningModule):
         self.model = nn.Sequential(
             # (T, N, bands=2, C=16, freq)
             SpectrogramNorm(channels=self.NUM_BANDS * self.ELECTRODE_CHANNELS),
-            nn.Dropout3d(p=0.05), #Channel dropout (new)
-            TimeMasking(mask_max_t=5), #Time masking (new)
             # (T, N, bands=2, mlp_features[-1])
             MultiBandRotationInvariantMLP(
                 in_features=in_features,
@@ -173,10 +171,16 @@ class TDSConvCTCModule(pl.LightningModule):
             ),
             # (T, N, num_features)
             nn.Flatten(start_dim=2),
-            nn.LayerNorm(num_features), #Layer norm (new)
+            # 2. CNN Stage (TDS Convolutional Blocks)
+            TDSConvEncoder(
+                num_features=num_features,
+                block_channels=block_channels,
+                kernel_width=kernel_width,
+            ),
+            # 3. LSTM Stage (Temporal Context)
             LSTM(
                 num_features=num_features,
-                hidden_size=384,
+                hidden_size=384,  # Adjust based on your GPU memory
                 num_layers=2,
                 bidirectional=True
             ),
