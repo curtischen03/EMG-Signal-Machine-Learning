@@ -30,4 +30,4 @@ ln -s ~/emg2qwerty-data-2021-08 ~/emg2qwerty/data
 ```
 
 ## Checkpoints Used In Project
-Here is a link to the checkpoints used in the final result: https://drive.google.com/drive/folders/1MbhLU7Q1fT8wlk4Nxhs6tKNNkqIOQ--l
+Our progress and experimentation can be seen in the branches. Here is a link to the checkpoints used in the final result: https://drive.google.com/drive/folders/1MbhLU7Q1fT8wlk4Nxhs6tKNNkqIOQ--l
