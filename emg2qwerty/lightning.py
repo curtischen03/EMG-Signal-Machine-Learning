@@ -22,11 +22,9 @@ from emg2qwerty.charset import charset
 from emg2qwerty.data import LabelData, WindowedEMGDataset
 from emg2qwerty.metrics import CharacterErrorRates
 from emg2qwerty.modules import (
-    LSTM,
     MultiBandRotationInvariantMLP,
     SpectrogramNorm,
     TDSConvEncoder,
-    TimeMasking
 )
 from emg2qwerty.transforms import Transform
 
@@ -138,6 +136,38 @@ class WindowedEMGDataModule(pl.LightningDataModule):
             persistent_workers=True,
         )
 
+class ExtraCNN(nn.Module):
+    """
+    Extra CNN block: (Conv1d + BatchNorm + ReLU) x2
+    """
+    def __init__(self, in_channels, hidden_channels=64):
+        super().__init__()
+
+        self.cnn = nn.Sequential(
+            nn.Conv1d(in_channels, hidden_channels, kernel_size=3, padding=1),
+            nn.BatchNorm1d(hidden_channels),
+            nn.ReLU(),
+            nn.Conv1d(hidden_channels, hidden_channels, kernel_size=3, padding=1),
+            nn.BatchNorm1d(hidden_channels),
+            nn.ReLU(),
+        )
+
+    def forward(self, x):
+        return self.cnn(x)
+class TemporalCNN(nn.Module):
+    """
+    Applies ExtraCNN to (T, N, C) tensors by permuting dimensions
+    """
+    def __init__(self, channels):
+        super().__init__()
+        self.cnn = ExtraCNN(channels, channels)
+
+    def forward(self, x):
+        # x: (T, N, C)
+        x = x.permute(1, 2, 0)   # (N, C, T)
+        x = self.cnn(x)
+        x = x.permute(2, 0, 1)   # (T, N, C)
+        return x
 
 class TDSConvCTCModule(pl.LightningModule):
     NUM_BANDS: ClassVar[int] = 2
@@ -163,8 +193,6 @@ class TDSConvCTCModule(pl.LightningModule):
         self.model = nn.Sequential(
             # (T, N, bands=2, C=16, freq)
             SpectrogramNorm(channels=self.NUM_BANDS * self.ELECTRODE_CHANNELS),
-            nn.Dropout3d(p=0.05), #Channel dropout (new)
-            TimeMasking(mask_max_t=5), #Time masking (new)
             # (T, N, bands=2, mlp_features[-1])
             MultiBandRotationInvariantMLP(
                 in_features=in_features,
@@ -173,14 +201,13 @@ class TDSConvCTCModule(pl.LightningModule):
             ),
             # (T, N, num_features)
             nn.Flatten(start_dim=2),
-            nn.LayerNorm(num_features), #Layer norm (new)
-            LSTM(
+            TDSConvEncoder(
                 num_features=num_features,
-                hidden_size=384,
-                num_layers=2,
-                bidirectional=True
+                block_channels=block_channels,
+                kernel_width=kernel_width,
             ),
             # (T, N, num_classes)
+            TemporalCNN(num_features), # extra CNN
             nn.Linear(num_features, charset().num_classes),
             nn.LogSoftmax(dim=-1),
         )
@@ -199,7 +226,6 @@ class TDSConvCTCModule(pl.LightningModule):
                 for phase in ["train", "val", "test"]
             }
         )
-        print(self.model)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.model(inputs)
